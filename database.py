@@ -30,7 +30,7 @@ class Database:
 
 	def get_all_class(self, school_id):
 		with self.connection:
-			result = self.cursor.execute('SELECT `class_id`,`title` FROM `class` WHERE `school_id` = ?', (school_id,)).fetchall()
+			result = self.cursor.execute('SELECT `class_id`,`number`,`title` FROM `class` WHERE `school_id` = ?', (school_id,)).fetchall()
 			return result
 
 	def get_school(self, school_id):
@@ -93,4 +93,10 @@ class Database:
 			result = self.cursor.execute('SELECT COUNT(*) FROM `schools`').fetchone()
 			return result[0]
 
-db = Database('db.db')
+	def add_class(self, title, school_id, number):
+		with self.connection:
+			self.cursor.execute('INSERT INTO `class` (`title`,`school_id`,`number`) VALUES(?,?,?)',(title,school_id,number))
+
+	def get_all_member_class(self, school_id, class_id):
+		with self.connection:
+			return self.cursor.execute('SELECT * FROM `users` WHERE `school_id` = ? AND `class_id` = ? ORDER BY `surname`',(school_id, class_id)).fetchall()

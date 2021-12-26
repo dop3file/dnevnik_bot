@@ -13,11 +13,12 @@ from aiogram.types import ReplyKeyboardRemove,ReplyKeyboardMarkup, KeyboardButto
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.utils.markdown import hlink
 
 import config
 from database import Database
 
-bot = Bot(token=config.API_TOKEN)
+bot = Bot(token=config.API_TOKEN,parse_mode=types.ParseMode.HTML)
 dp = Dispatcher(bot,storage=MemoryStorage())
 
 
@@ -56,7 +57,7 @@ async def student_registration(message):
 	else:
 		button_exit = KeyboardButton('Выйти') 
 
-		menu = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+		menu = ReplyKeyboardMarkup(one_time_keyboard=True)
 		menu.add(button_exit)
 
 
@@ -67,6 +68,7 @@ async def student_registration(message):
 async def create_profile_name(message: types.Message, state: FSMContext):
 	if message.text == 'Выйти':
 		await exit(message, state)
+		await state.finish()
 	else:
 		await state.update_data(profile_name=message.text.title())
 		await message.reply(message.text.title() + ',введите вашу фамилию')
@@ -107,8 +109,7 @@ async def create_profile_class(message: types.Message, state: FSMContext):
 		all_class = ''
 		for classes in db.get_all_class(user_data["profile_school_id"]):
 			classes = [str(i) for i in classes]
-			all_class += ' | '.join(classes)
-			all_class += '\n'
+			all_class += f'{classes[0]} | {classes[1] + classes[2]}\n'
 
 		await message.answer(f'А теперь введите номер своего класса\n\n{all_class}')
 		await CreateProfile.next()
@@ -135,10 +136,12 @@ async def create_profile_all_info(message: types.Message, state: FSMContext):
 @dp.message_handler(state=CreateProfile.finish_)
 async def create_profile_finish(message: types.Message, state: FSMContext):
 	if message.text == 'Заполнить заново❌':
+		await state.finish()
 		await student_registration(message)
 
 	elif message.text == 'Выйти':
 		await start(message)
+		await state.finish()
 
 	else:
 		user_data = await state.get_data()
@@ -173,6 +176,7 @@ class CreateProfileTeacher(StatesGroup):
 @dp.message_handler(state=CreateProfileTeacher.code)
 async def create_profile_teacher_code(message: types.Message, state: FSMContext):
 	if message.text == 'Выйти':
+		await state.finish()
 		await exit(message, state)
 	else:
 		if db.check_moderation_code(message.text):
@@ -221,8 +225,10 @@ async def create_profile_all_info(message: types.Message, state: FSMContext):
 @dp.message_handler(state=CreateProfileTeacher.finish_)
 async def create_profile_finish(message: types.Message, state: FSMContext):
 	if message.text == 'Заполнить заново❌':
+		await state.finish()
 		await teacher_registration(message)
 	elif message.text == 'Выйти':
+		await state.finish()
 		await start(message)
 	else:
 		user_data = await state.get_data()
@@ -262,13 +268,21 @@ async def schools(message: types.Message):
 		if db.get_all_info_user(message.from_user.id)[4] == None:
 			button_choose_school = KeyboardButton('Выбрать школу из списка📂')
 			button_add_school = KeyboardButton('Добавить школу✅')
+			button_exit = KeyboardButton('Выйти')
 
-			menu = ReplyKeyboardMarkup()
-			menu.add(button_add_school, button_choose_school)
+			menu = ReplyKeyboardMarkup(one_time_keyboard=True)
+			menu.add(button_add_school, button_choose_school,button_exit)
 
 			await message.answer('Добавьте или выберите школу',reply_markup=menu)
 		else: 
-			await message.answer('У вас есть школа')
+			button_choose_class = KeyboardButton('Посмотреть класс из списка📂')
+			button_add_class = KeyboardButton('Добавить класс✅')
+			button_exit = KeyboardButton('Выйти')
+
+			menu = ReplyKeyboardMarkup(one_time_keyboard=True)
+			menu.add(button_add_class, button_choose_class,button_exit)
+
+			await message.answer('Добавьте или выберите класс',reply_markup=menu)
 	else:
 		await message.answer('У вас нет прав на данную функцию')
 
@@ -277,7 +291,9 @@ class CreateSchool(StatesGroup):
 
 @dp.message_handler(lambda message: message.text == 'Добавить школу✅', state='*')
 async def add_school(message: types.Message):
-	if db.user_type(message.from_user.id):
+	if message.text == 'Выйти':
+		await exit(message,state)
+	elif db.user_type(message.from_user.id):
 		if db.get_all_info_user(message.from_user.id)[4] == None:
 			await message.answer('Введите название школы: ')
 			await CreateSchool.name.set()
@@ -332,9 +348,94 @@ async def id_school(message: types.Message, state: FSMContext):
 	await state.finish()
 	await schools(message)
 
+class CreateClass(StatesGroup):
+	number = State()
+	title = State()
+
+@dp.message_handler(lambda message: message.text == 'Добавить класс✅', state='*')
+async def add_class(message: types.Message):
+	if db.user_type(message.from_user.id):
+		await message.answer('Введите номер класса: ')
+		await CreateClass.number.set()	
+	else:
+		await message.answer('У вас нет прав на данную функцию')
+
+@dp.message_handler(state=CreateClass.number)
+async def number_class(message: types.Message, state: FSMContext):
+	if message.text == 'Выйти':
+		await exit(message,state)
+	await state.update_data(number=int(message.text))
+
+	await message.answer('Теперь введите букву вашего класса: ')
+	await CreateClass.next()
+
+@dp.message_handler(state=CreateClass.title)
+async def title_class(message: types.Message, state: FSMContext):
+	await state.update_data(title=message.text)
+	user_data = await state.get_data()
+
+	await message.answer('Прекрасно!\nКласс добавлен')
+	db.add_class(user_data['title'], db.get_all_info_user(message.from_user.id)[4], user_data['number'])
+	await state.finish()
+
+class ChooseClass(StatesGroup):
+	id_class = State()
+	id_member = State()
+
+@dp.message_handler(lambda message: message.text == 'Посмотреть класс из списка📂', state='*')
+async def choose_class(message: types.Message):
+	if db.user_type(message.from_user.id):
+		all_class = ''
+		for classes in db.get_all_class(db.get_all_info_user(message.from_user.id)[4]):
+			classes = [str(i) for i in classes]
+			all_class += f'{classes[0]} | {classes[1] + classes[2]}\n'
+
+		await message.answer(f'<b><i>Введите номер класса:</i></b> \n\n{all_class}')
+		await ChooseClass.id_class.set()
+	else:
+		await message.answer('У вас нет прав на данную функцию')
+
+@dp.message_handler(state=ChooseClass.id_class)
+async def choose_id_class(message: types.Message, state: FSMContext):
+	if message.text == 'Выйти':
+		await exit(message,state)
+
+	await state.update_data(id_class=int(message.text))
+	user_data = await state.get_data()
+
+	all_members_class = ''
+	all_members_class_db = db.get_all_member_class(db.get_all_info_user(message.from_user.id)[4], user_data['id_class'])
+	for count,members in enumerate(all_members_class_db):
+		member = [str(i) for i in members]
+		all_members_class += f'{count + 1} | {member[2] + " " + member[1]}\n'
+
+	await message.answer(f'<b><i>Ученики данного класса</i></b>\nКоличество учеников - {len(all_members_class_db)}\n\n{all_members_class}')
+	await message.answer('Введите номер заинтересовавшего вас ученика:')
+
+	await ChooseClass.next()
+
+@dp.message_handler(state=ChooseClass.id_member)
+async def choose_id_member(message: types.Message, state: FSMContext):
+	try:
+		if message.text == 'Выйти':
+			await exit(message,state)
+		else:
+			await state.update_data(id_member=int(message.text))
+			user_data = await state.get_data()
+			
+			info_user = db.get_all_info_user(db.get_all_member_class(db.get_all_info_user(message.from_user.id)[4], user_data['id_class'])[user_data['id_member'] - 1][5])
+
+			await message.answer(f'Имя - {info_user[1]}\nФамилия - {info_user[2]}')
+	except IndexError:
+		await message.answer('Ученика с таким номером не существует в данном классе')
 
 @dp.message_handler(commands=['exit'],state='*')
 async def exit(message: types.Message, state: FSMContext):
+	await state.finish()
+	await start(message)
+
+@dp.message_handler(lambda message: message.text == 'Выйти',state='*')
+async def exit_text(message: types.Message, state: FSMContext):
 	await state.finish()
 	await start(message)
 
