@@ -1,6 +1,7 @@
 import logging
 import random
 import sqlite3
+from datetime import datetime
 
 from aiogram import *
 from aiogram import Bot, types
@@ -248,11 +249,11 @@ async def profile(message: types.Message):
 			button_school = KeyboardButton('Школа🏫') 
 			button_marks = KeyboardButton('Оценки📚')
 			button_homework = KeyboardButton('Домашнее задания📝')
+			button_attendance = KeyboardButton('Посещаемость🗃')
 			button_timetable = KeyboardButton('Расписание🗓')
-			button_best_students = KeyboardButton('Топ учеников⭐️')
 
 			menu = ReplyKeyboardMarkup()
-			menu.add(button_school, button_marks, button_homework, button_timetable, button_best_students)
+			menu.add(button_school, button_marks, button_homework, button_attendance, button_timetable)
 
 			await message.answer(f"Здравствуйте {db.get_all_info_user(message.from_user.id)[1]} {db.get_all_info_user(message.from_user.id)[9]}!\n\nВас приветствует телеграм бот {config.NAME_PROJECT}\nЗдесь вы сможете проставлять оценки ученикам, анализировать успеваемость класса и следить за выполнением домашнего задания"
 				,reply_markup=menu)
@@ -285,6 +286,23 @@ async def schools(message: types.Message):
 			await message.answer('Добавьте или выберите класс',reply_markup=menu)
 	else:
 		await message.answer('У вас нет прав на данную функцию')
+
+def check_members_class(user_id, class_id):
+	all_members_class = ''
+	all_members_class_db = db.get_all_member_class(db.get_all_info_user(user_id)[4], class_id)
+	for count,members in enumerate(all_members_class_db):
+		member = [str(i) for i in members]
+		all_members_class += f'{count + 1} | {member[2] + " " + member[1]}\n'
+
+	return [all_members_class, all_members_class_db]
+
+def check_all_class(user_id):
+	all_class = ''
+	for classes in db.get_all_class(db.get_all_info_user(user_id)[4]):
+		classes = [str(i) for i in classes]
+		all_class += f'{classes[0]} | {classes[1] + classes[2]}\n'
+
+	return all_class
 
 class CreateSchool(StatesGroup):
 	name = State()
@@ -364,10 +382,11 @@ async def add_class(message: types.Message):
 async def number_class(message: types.Message, state: FSMContext):
 	if message.text == 'Выйти':
 		await exit(message,state)
-	await state.update_data(number=int(message.text))
+	else:
+		await state.update_data(number=int(message.text))
 
-	await message.answer('Теперь введите букву вашего класса: ')
-	await CreateClass.next()
+		await message.answer('Теперь введите букву вашего класса: ')
+		await CreateClass.next()
 
 @dp.message_handler(state=CreateClass.title)
 async def title_class(message: types.Message, state: FSMContext):
@@ -385,12 +404,7 @@ class ChooseClass(StatesGroup):
 @dp.message_handler(lambda message: message.text == 'Посмотреть класс из списка📂', state='*')
 async def choose_class(message: types.Message):
 	if db.user_type(message.from_user.id):
-		all_class = ''
-		for classes in db.get_all_class(db.get_all_info_user(message.from_user.id)[4]):
-			classes = [str(i) for i in classes]
-			all_class += f'{classes[0]} | {classes[1] + classes[2]}\n'
-
-		await message.answer(f'<b><i>Введите номер класса:</i></b> \n\n{all_class}')
+		await message.answer(f'<b><i>Введите номер класса:</i></b> \n\n{check_all_class(message.from_user.id)}')
 		await ChooseClass.id_class.set()
 	else:
 		await message.answer('У вас нет прав на данную функцию')
@@ -403,16 +417,17 @@ async def choose_id_class(message: types.Message, state: FSMContext):
 	await state.update_data(id_class=int(message.text))
 	user_data = await state.get_data()
 
-	all_members_class = ''
-	all_members_class_db = db.get_all_member_class(db.get_all_info_user(message.from_user.id)[4], user_data['id_class'])
-	for count,members in enumerate(all_members_class_db):
-		member = [str(i) for i in members]
-		all_members_class += f'{count + 1} | {member[2] + " " + member[1]}\n'
+	all_members_class, all_members_class_db = check_members_class(message.from_user.id, user_data['id_class'])
 
-	await message.answer(f'<b><i>Ученики данного класса</i></b>\nКоличество учеников - {len(all_members_class_db)}\n\n{all_members_class}')
-	await message.answer('Введите номер заинтересовавшего вас ученика:')
+	if len(all_members_class_db) > 0:
+		await message.answer(f'<b><i>Ученики данного класса</i></b>\nКоличество учеников - {len(all_members_class_db)}\n\n{all_members_class}')
+		await message.answer('Введите номер заинтересовавшего вас ученика:')
 
-	await ChooseClass.next()
+		await ChooseClass.next()
+	else:
+		await message.answer('В этом классе пока нету учеников')
+		await state.finish()
+		await choose_class(message)
 
 @dp.message_handler(state=ChooseClass.id_member)
 async def choose_id_member(message: types.Message, state: FSMContext):
@@ -428,6 +443,201 @@ async def choose_id_member(message: types.Message, state: FSMContext):
 			await message.answer(f'Имя - {info_user[1]}\nФамилия - {info_user[2]}')
 	except IndexError:
 		await message.answer('Ученика с таким номером не существует в данном классе')
+
+@dp.message_handler(lambda message: message.text == 'Оценки📚', state='*')
+async def marks_menu(message: types.Message):
+	if db.user_type(message.from_user.id):
+		if db.get_all_info_user(message.from_user.id)[4] == None:
+			await message.answer('У вас не выбрана школа')
+		else: 
+			button_add_mark = KeyboardButton('Поставить оценки')
+			button_check_mark = KeyboardButton('Посмотреть оценки')
+			button_exit = KeyboardButton('Выйти')
+
+			menu = ReplyKeyboardMarkup(one_time_keyboard=True)
+			menu.add(button_add_mark, button_check_mark,button_exit)
+
+			await message.answer('Просмотрите или поставьте оценки',reply_markup=menu)
+	else:
+		await message.answer('У вас нет прав на данную функцию')
+
+class AddMark(StatesGroup):
+	id_class = State()
+	subject = State()
+	mark = State()
+
+@dp.message_handler(lambda message: message.text == 'Поставить оценки', state='*')
+async def add_marks(message: types.Message):
+	if db.user_type(message.from_user.id):
+		await message.answer(f'<b><i>Введите номер класса:</i></b> \n\n{check_all_class(message.from_user.id)}')
+		await AddMark.id_class.set()
+	else:
+		await message.answer('У вас нет прав на данную функцию')
+
+@dp.message_handler(state=AddMark.id_class)
+async def choose_subject(message: types.Message, state: FSMContext):
+	if message.text == 'Выйти':
+		await exit(message,state)
+	else:
+		await state.update_data(id_class=int(message.text))
+		user_data = await state.get_data()
+
+		all_subjects = ''
+
+		for id_subject, subject in enumerate(db.get_all_subjects(db.get_class(user_data['id_class'])[3])):
+			all_subjects += f'{id_subject + 1} | {subject[0]}\n'
+
+		await message.answer(f'Введите номер предмета:\n{all_subjects}')
+		await AddMark.next()
+
+@dp.message_handler(state=AddMark.subject)
+async def choose_id_class_marks(message: types.Message, state: FSMContext):
+	if message.text == 'Выйти':
+		await exit(message,state)
+	else:
+		await state.update_data(subject_id=int(message.text))
+		user_data = await state.get_data()
+
+		all_members_class, all_members_class_db = check_members_class(message.from_user.id, user_data['id_class'])
+		
+		if len(all_members_class_db) > 0:
+			await message.answer('Введите номер ученика и его оценку\nПример: 3 - 7 - комментарий по желанию (где 3 это номер ученика, а 7 это оценка)\n\nЕсли хотите поставить больше одной оценки то разделяйте учеников переносом на следующую строку\nПример:\n1 - 9\n2 - 7')
+			await message.answer(f'<b><i>Ученики данного класса</i></b>\nКоличество учеников - {len(all_members_class_db)}\n\n{all_members_class}')
+
+			await AddMark.next()
+		else:
+			await message.answer('В этом классе пока нету учеников')
+			await state.finish()
+			await marks_menu(message)
+
+@dp.message_handler(state=AddMark.mark)
+async def add_marks(message: types.Message, state: FSMContext):
+	if message.text == 'Выйти':
+		await exit(message,state)
+	else:
+		try:
+			await state.update_data(marks=message.text)
+			user_data = await state.get_data()
+
+			subject = db.get_all_subjects(db.get_class(user_data['id_class'])[3])[user_data['subject_id'] - 1][0]
+			
+			for mark in user_data['marks'].split('\n'):
+				id_user = int(mark.split('-')[0].replace(' ',''))
+				mark_user = int(mark.split('-')[1].replace(' ',''))
+
+				if len(mark.split('-')) == 3:
+					comment = mark.split('-')[2][1::]
+				else:
+					comment = None
+
+				telegram_id_user = db.get_all_info_user(db.get_all_member_class(db.get_all_info_user(message.from_user.id)[4], user_data['id_class'])[id_user - 1][5])[5]
+				db.add_mark(subject=subject, mark=mark_user, telegram_id=telegram_id_user, comment=comment)
+
+
+			await message.answer('Прекрасно!\nОценки выставлены')
+			await marks_menu(message)
+		except Exception as e:
+			print(e)
+			await message.answer('Что то пошло не так')
+			await state.finish()
+			await marks_menu(message)
+
+class CheckMark(StatesGroup):
+	id_class = State()
+	subject = State()
+	check_mark = State()
+
+@dp.message_handler(lambda message: message.text == 'Посмотреть оценки', state='*')
+async def check_marks(message: types.Message):
+	if db.user_type(message.from_user.id):
+		await message.answer(f'<b><i>Введите номер класса:</i></b> \n\n{check_all_class(message.from_user.id)}')
+		await CheckMark.id_class.set()
+	else:
+		await message.answer('У вас нет прав на данную функцию')
+
+@dp.message_handler(state=CheckMark.id_class)
+async def choose_subject_check_marks(message: types.Message, state: FSMContext):
+	if message.text == 'Выйти':
+		await exit(message,state)
+	else:
+		await state.update_data(id_class=int(message.text))
+		user_data = await state.get_data()
+
+		all_subjects = ''
+
+		for id_subject, subject in enumerate(db.get_all_subjects(db.get_class(user_data['id_class'])[3])):
+			all_subjects += f'{id_subject + 1} | {subject[0]}\n'
+
+		await message.answer(f'Введите номер предмета:\n{all_subjects}')
+		await CheckMark.next()
+
+@dp.message_handler(state=CheckMark.subject)
+async def choose_id_class_marks(message: types.Message, state: FSMContext):
+	if message.text == 'Выйти':
+		await exit(message,state)
+	else:
+		await state.update_data(subject_id=int(message.text))
+		user_data = await state.get_data()
+
+		all_members_class, all_members_class_db = check_members_class(message.from_user.id, user_data['id_class'])
+		
+		if len(all_members_class_db) > 0:
+			await message.answer(f'<b><i>Ученики данного класса</i></b>\nКоличество учеников - {len(all_members_class_db)}\n\n{all_members_class}')
+			await message.answer('Введите номер ученика что бы посмотреть его оценки')
+
+			await CheckMark.next()
+		else:
+			await message.answer('В этом классе пока нету учеников')
+			await state.finish()
+			await marks_menu(message)
+
+@dp.message_handler(state=CheckMark.check_mark)
+async def check_marks(message: types.Message, state: FSMContext):
+	if message.text == 'Выйти':
+		await exit(message,state)
+	else:
+		try:
+			await state.update_data(user_id=int(message.text))
+			user_data = await state.get_data()
+
+			subject = db.get_all_subjects(db.get_class(user_data['id_class'])[3])[user_data['subject_id'] - 1][0]
+			
+			info_user = db.get_all_info_user(db.get_all_member_class(db.get_all_info_user(message.from_user.id)[4], user_data['id_class'])[user_data['user_id'] - 1][5])
+
+			header = 'Дата' + ' ' * 10 + 'Оценка'
+			all_marks = ''
+			if not len(db.get_all_marks_student(subject, info_user[5])):
+				await message.answer(f'У {info_user[2]} {info_user[1]} нет оценок по этому предмету')
+				await marks_menu(message)
+			else:
+				for mark in db.get_all_marks_student(subject, info_user[5]):
+					date = datetime.strptime(mark[2], "%Y-%m-%d %H:%M:%S")
+					
+
+					comment = f" | {mark[4]}" if mark[4] else ''
+					all_marks += f"{date.strftime('%d.%m.%y')} | {mark[1]} {comment}\n"
+
+				await message.answer(f'Оценки {info_user[2]} {info_user[1]}:\n{header}\n{all_marks}')
+				await marks_menu(message)
+		except Exception as e:
+			print(e)
+			await message.answer('Что то пошло не так')
+			await state.finish()
+			await marks_menu(message)
+
+@dp.message_handler(lambda message: message.text == 'Расписание🗓', state='*')
+async def timetable_menu(message: types.Message):
+	if db.user_type(message.from_user.id):
+		button_call_timetable = KeyboardButton('Расписание звонков')
+		button_education_timetable = KeyboardButton('Учебное расписание')
+		button_exit = KeyboardButton('Выйти')
+
+		menu = ReplyKeyboardMarkup(one_time_keyboard=True)
+		menu.add(button_call_timetable, button_education_timetable,button_exit)
+
+		await message.answer('Расписание звонков и учебное расписание🗓',reply_markup=menu)
+	else:
+		await message.answer('У вас нет прав на данную функцию')
 
 @dp.message_handler(commands=['exit'],state='*')
 async def exit(message: types.Message, state: FSMContext):

@@ -95,8 +95,20 @@ class Database:
 
 	def add_class(self, title, school_id, number):
 		with self.connection:
-			self.cursor.execute('INSERT INTO `class` (`title`,`school_id`,`number`) VALUES(?,?,?)',(title,school_id,number))
+			self.cursor.execute('INSERT INTO `class` (`title`,`school_id`,`number`) VALUES(?,?,?) ',(title,school_id,number))
 
 	def get_all_member_class(self, school_id, class_id):
 		with self.connection:
 			return self.cursor.execute('SELECT * FROM `users` WHERE `school_id` = ? AND `class_id` = ? ORDER BY `surname`',(school_id, class_id)).fetchall()
+
+	def get_all_subjects(self, class_number):
+		with self.connection:
+			return self.cursor.execute(f'SELECT `title_subject` FROM `subjects` WHERE `start_learn` <= {class_number} AND `end_learn` >= {class_number}').fetchall()
+
+	def add_mark(self, subject, mark, telegram_id, comment=None):
+		with self.connection:
+			self.cursor.execute("INSERT INTO `marks` (`subject`,`mark`,`date`,`telegram_id`,`comment`) VALUES(?,?,datetime('now'),?,?) ",(subject,mark,telegram_id,comment))
+
+	def get_all_marks_student(self, subject, telegram_id):
+		with self.connection:
+			return self.cursor.execute('SELECT * FROM `marks` WHERE `subject` = ? AND `telegram_id` = ? ORDER BY `date`',(subject, telegram_id)).fetchall()
