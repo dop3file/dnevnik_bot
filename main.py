@@ -8,6 +8,7 @@ import os
 from aiogram import *
 from aiogram import Bot, types
 from aiogram.utils import executor
+from aiogram.utils.exceptions import ChatNotFound 
 from aiogram.dispatcher import Dispatcher
 from aiogram.types import ParseMode, InputMediaPhoto, InputMediaVideo, ChatActions
 from aiogram.types import ReplyKeyboardRemove,ReplyKeyboardMarkup, KeyboardButton, \
@@ -255,11 +256,10 @@ async def profile(message: types.Message):
 			final = str(ct - now)
 
 			button_dnevnik = KeyboardButton('Дневник🗓') 
-			button_test = KeyboardButton('ЦТ')
-			button_timer = KeyboardButton(f'До ЦТ - {final.split(" ")[0]} дней')
+			button_timer = KeyboardButton(f'До ЦТ - {final.split(" ")[0]} дня')
 
 			menu = ReplyKeyboardMarkup()
-			menu.add(button_dnevnik, button_test)
+			menu.add(button_dnevnik, button_timer)
 			await message.answer(f'Здравствуйте {db.get_all_info_user(message.from_user.id)[1]}!\n\nВас приветствует телеграм бот {config.NAME_PROJECT}\nЗдесь вы сможете увидеть свои оценки, домашнее задание, расписание и многое другое',reply_markup=menu)
 		elif db.user_type(message.from_user.id):
 			button_school = KeyboardButton('Школа🏫') 
@@ -267,9 +267,10 @@ async def profile(message: types.Message):
 			button_homework = KeyboardButton('Домашнее задания📝')
 			button_attendance = KeyboardButton('Посещаемость🗃')
 			button_timetable = KeyboardButton('Расписание🗓')
+			button_communication = KeyboardButton('Коммуникация🗣')
 
 			menu = ReplyKeyboardMarkup()
-			menu.add(button_school, button_marks, button_homework, button_attendance, button_timetable)
+			menu.add(button_school, button_marks, button_homework, button_attendance, button_timetable, button_communication)
 
 			await message.answer(f"Здравствуйте {db.get_all_info_user(message.from_user.id)[1]} {db.get_all_info_user(message.from_user.id)[9]}!\n\nВас приветствует телеграм бот {config.NAME_PROJECT}\nЗдесь вы сможете проставлять оценки ученикам, анализировать успеваемость класса и следить за выполнением домашнего задания"
 				,reply_markup=menu)
@@ -399,10 +400,15 @@ async def number_class(message: types.Message, state: FSMContext):
 	if message.text == 'Выйти':
 		await exit(message,state)
 	else:
-		await state.update_data(number=int(message.text))
+		try:
+			await state.update_data(number=int(message.text))
 
-		await message.answer('Теперь введите букву вашего класса: ')
-		await CreateClass.next()
+			await message.answer('Теперь введите букву вашего класса: ')
+			await CreateClass.next()
+		except ValueError:
+			await message.answer('Нужно ввести номер класса, только цифру')
+			await state.finish()
+			await add_class(message)
 
 @dp.message_handler(state=CreateClass.title)
 async def title_class(message: types.Message, state: FSMContext):
@@ -480,6 +486,7 @@ async def marks_menu(message: types.Message):
 class AddMark(StatesGroup):
 	id_class = State()
 	subject = State()
+	date = State()
 	mark = State()
 
 @dp.message_handler(lambda message: message.text == 'Поставить оценки', state='*')
@@ -526,13 +533,30 @@ async def choose_id_class_marks(message: types.Message, state: FSMContext):
 			await state.finish()
 			await marks_menu(message)
 
+@dp.message_handler(state=AddMark.date)
+async def choose_date_marks(message: types.Message, state: FSMContext):
+	if message.text == 'Выйти':
+		await exit(message,state)
+	else:
+		await state.update_data(marks=message.text)
+		user_data = await state.get_data()
+
+		button_today = KeyboardButton('Сегодня')
+
+		menu = ReplyKeyboardMarkup(one_time_keyboard=True)
+		menu.add(button_today)
+
+		await message.answer('Введите дату урока на который нужно поставить оценки\nПример: 26.01.2022',reply_markup=menu)
+		
+		await AddMark.next()
+
 @dp.message_handler(state=AddMark.mark)
 async def add_marks(message: types.Message, state: FSMContext):
 	if message.text == 'Выйти':
 		await exit(message,state)
 	else:
 		try:
-			await state.update_data(marks=message.text)
+			await state.update_data(date=message.text)
 			user_data = await state.get_data()
 
 			subject = db.get_all_subjects(db.get_class(user_data['id_class'])[3])[user_data['subject_id'] - 1][0]
@@ -540,6 +564,11 @@ async def add_marks(message: types.Message, state: FSMContext):
 			for mark in user_data['marks'].split('\n'):
 				id_user = int(mark.split('-')[0].replace(' ',''))
 				mark_user = int(mark.split('-')[1].replace(' ',''))
+				if user_data['date'].lower() == 'сегодня':
+					date_mark = datetime.strptime(str(datetime.now()).split(' ')[0],'%Y-%m-%d')
+				else:
+					date_mark = datetime.strptime(user_data['date'],'%d.%m.%Y')
+
 
 				if len(mark.split('-')) == 3:
 					comment = mark.split('-')[2][1::]
@@ -547,11 +576,17 @@ async def add_marks(message: types.Message, state: FSMContext):
 					comment = None
 
 				telegram_id_user = db.get_all_info_user(db.get_all_member_class(db.get_all_info_user(message.from_user.id)[4], user_data['id_class'])[id_user - 1][5])[5]
-				await bot.send_message(telegram_id_user,f'{db.get_all_info_user(message.from_user.id)[1]} {db.get_all_info_user(message.from_user.id)[9]} поставил вам {mark_user} по предмету {subject}')
-				db.add_mark(subject=subject, mark=mark_user, telegram_id=telegram_id_user, comment=comment)
+				try:
+					await bot.send_message(telegram_id_user,f'{db.get_all_info_user(message.from_user.id)[1]} {db.get_all_info_user(message.from_user.id)[9]} поставил вам {mark_user} по предмету {subject}')
+				except Exception:
+					pass
+
+				db.add_mark(subject=subject, mark=mark_user, date=date_mark, telegram_id=telegram_id_user, comment=comment)
+				db.update_rating(sys_func.rating_formula(db.get_impact_user(telegram_id_user)[0],db.get_all_marks_student_leaderboard(telegram_id_user)[0][0]), telegram_id_user)
 
 
 			await message.answer('Прекрасно!\nОценки выставлены')
+			await state.finish()
 			await marks_menu(message)
 		except Exception as e:
 			print(e)
@@ -710,6 +745,7 @@ async def add_timetable_days(message: types.Message, state: FSMContext):
 		days_timetable = []
 		circle = -1
 		for el in user_data['days'].split('\n'):
+			el = el.strip(' ')
 			if el in days_rus:
 				circle += 1
 				days_timetable.append([])
@@ -729,7 +765,8 @@ async def add_timetable_days(message: types.Message, state: FSMContext):
 		await message.answer('Ваше расписание добавлено!')
 		await state.finish()
 		await education_timetable_menu(message)
-	except:
+	except Exception as e:
+		print(e)
 		await message.answer('Что то пошло не так')
 		await state.finish()
 		await education_timetable_menu(message)
@@ -818,37 +855,38 @@ async def dnevnik(message: types.Message):
 	end_week = start_week + timedelta(5)
 	month = now.strftime('%B')
 	year = str(now.year)[2:]
+	
 
 	try:
 		marks = db.get_marks_order_date(message.from_user.id, start_week, end_week)
 	except Exception:
 		marks = []
+
 	final_marks = []
 	for mark in marks:
 		try:
-			day = datetime.strptime(mark[1], "%Y-%m-%d %H:%M:%S").weekday()
-			subject_number = db.get_timetable(school_id, class_id)[1 + day + 1].split('\n').index(mark[2]) + 1
-			final_marks.append([day,subject_number,mark[0]])
-		except Exception:
-			pass
+			mark_day = datetime.strptime(mark[1], "%Y-%m-%d %H:%M:%S").weekday()
+			subject_number = db.get_timetable(school_id, class_id)[1 + mark_day + 1].split('\n').index(mark[2]) + 1
+			final_marks.append([mark_day,subject_number,mark[0]])
+		except Exception as e:
+			print(e)
 
 	try:
 		homework = db.get_homework_order_date(start_week - timedelta(7), end_week - timedelta(7))
 	except Exception as e:
 		homework = []
+
 	final_homework = []
 	for task in homework:
 		try:
-			day = datetime.strptime(task[1], "%Y-%m-%d %H:%M:%S").weekday()
-			subject_number = db.get_timetable(school_id, class_id)[1 + day + 1].split('\n').index(task[0]) + 1
+			task_day = datetime.strptime(task[1], "%Y-%m-%d %H:%M:%S").weekday()
+			subject_number = db.get_timetable(school_id, class_id)[1 + task_day + 1].split('\n').index(task[0]) + 1
 			homework = task[2]
-			final_homework.append([day, subject_number, homework])
+			final_homework.append([task_day, subject_number, homework])
 		except Exception as e:
 			print(e)
 
-
-
-	timetable = db.get_timetable(school_id, class_id)
+	timetable = db.get_timetable(school_id, class_id)		
 	timetable = list(map(lambda item: item.split('\n'),timetable[2::]))
 	timetable = list(map(lambda item: sys_func.reduce_subjects_titles(item), timetable))
 
@@ -996,6 +1034,7 @@ async def attendance_final(message: types.Message, state: FSMContext):
 		class_id = db.get_class_id(user_data['class_title'][-1], int(user_data['class_title'][:-1]), db.get_all_info_user(message.from_user.id)[4])[0][0]
 		for student in students:
 			telegram_id_user = db.get_all_info_user(db.get_all_member_class(db.get_all_info_user(message.from_user.id)[4], class_id)[student - 1][5])[5]
+			await bot.send_message(telegram_id_user,f'{db.get_all_info_user(message.from_user.id)[1]} {db.get_all_info_user(message.from_user.id)[9]} поставил вам пропуск по предмету {subject}')
 			db.add_attendance(subject, telegram_id_user)
 		
 		await message.answer('Прекрасно!')
@@ -1088,7 +1127,13 @@ async def homework_final(message: types.Message, state: FSMContext):
 
 @dp.message_handler(lambda message: message.text.startswith('До ЦТ - '), state='*')
 async def ct(message: types.Message):
-	await message.answer('''
+	now = date.today()
+	ct = date(2022,6,16)
+	final = str(ct - now)
+
+	await message.answer(f'''
+До ЦТ - {final.split(" ")[0]} дня
+
 График ЦТ в основные дни:
 
 <b>16 июня</b> – белорусский язык;
@@ -1104,7 +1149,167 @@ async def ct(message: types.Message):
 <b>8 июля</b> – всемирная история (новейшее время).
 
 Начало всех тестов ЦТ-2022 в 11-00
-''')
+''') 
+
+@dp.message_handler(lambda message: message.text == 'Коммуникация🗣', state='*')
+async def communication_menu(message: types.Message):
+	if db.user_type(message.from_user.id):
+		button_events = KeyboardButton('Мероприятия')
+		button_communication = KeyboardButton('Сообщить что-либо')
+		button_inform_test = KeyboardButton('Напомнить о контрольной')
+		button_exit = KeyboardButton('Выйти')
+
+		menu = ReplyKeyboardMarkup(one_time_keyboard=True)
+		menu.add(button_events, button_communication, button_inform_test, button_exit)
+
+		await message.answer('Общайтесь со своим классом или со всей школой сразу!',reply_markup=menu)
+	else:
+		await message.answer('У вас нет прав на данную функцию')
+
+@dp.message_handler(lambda message: message.text == 'Сообщить что-либо', state='*')
+async def inform_menu(message: types.Message):
+	if db.user_type(message.from_user.id):
+		button_inform_class = KeyboardButton('Сообщить классу')
+		button_inform_school = KeyboardButton('Сообщить школе')
+		button_exit = KeyboardButton('Выйти')
+
+		menu = ReplyKeyboardMarkup(one_time_keyboard=True)
+		menu.add(button_inform_class, button_inform_school, button_exit)
+
+		await message.answer('Сообщите что-либо классу или всей школе', reply_markup=menu)
+	else:
+		await message.answer('У вас нет прав на данную функцию')
+
+class InformSchool(StatesGroup):
+	message = State()
+
+@dp.message_handler(lambda message: message.text == 'Сообщить школе', state='*')
+async def inform_school(message: types.Message):
+	if db.user_type(message.from_user.id):
+		await message.answer('Напишите ваше сообщение для всей школы\n<b>P.S Не злоупотребляйте этой функцией :)</b>')
+		await InformSchool.message.set()
+
+	else:
+		await message.answer('У вас нет прав на данную функцию')
+
+
+@dp.message_handler(state=InformSchool.message)
+async def inform_school_message(message: types.Message, state: FSMContext):
+	await state.update_data(message_text=message.text)
+	user_data = await state.get_data()
+
+	for user in db.get_all_student_school(db.get_all_info_user(message.from_user.id)[4]):
+		try:
+			await bot.send_message(user[5], f'Сообщения от {db.get_all_info_user(message.from_user.id)[1]}а {db.get_all_info_user(message.from_user.id)[9]}а\n{user_data["message_text"]}')
+		except ChatNotFound:
+			pass
+
+	await message.answer('Прекрасно!\nСообщения было отправлено')
+	await state.finish()
+	await start(message)
+
+class InformClass(StatesGroup):
+	class_ = State()
+	message = State()
+
+@dp.message_handler(lambda message: message.text == 'Сообщить классу', state='*')
+async def inform_class(message: types.Message):
+	if db.user_type(message.from_user.id):
+		await message.answer(f'<b><i>Введите номер класса:</i></b> \n\n{check_all_class(message.from_user.id)}')
+		await InformClass.class_.set()
+	else:
+		await message.answer('У вас нет прав на данную функцию') 
+
+@dp.message_handler(state=InformClass.class_)
+async def inform_class_id(message: types.Message, state: FSMContext):
+	await state.update_data(id_class=int(message.text))
+	await message.answer('Теперь введите сообщения для вашего класса')
+	await InformClass.next()
+
+@dp.message_handler(state=InformClass.message)
+async def inform_class_message(message: types.Message, state: FSMContext):
+	await state.update_data(message_text=message.text)
+	user_data = await state.get_data()
+
+	all_users_class = db.get_all_member_class(db.get_all_info_user(message.from_user.id)[4], user_data['id_class'])
+
+	for user in all_users_class:
+		try:
+			await bot.send_message(user[5], f'Сообщения от {db.get_all_info_user(message.from_user.id)[1]}а {db.get_all_info_user(message.from_user.id)[9]}а\n{user_data["message_text"]}')
+		except ChatNotFound:
+			pass
+
+	await message.answer('Прекрасно!\nСообщения было отправлено')
+	await state.finish()
+	await start(message)
+
+class InformTest(StatesGroup):
+	class_id = State()
+	subject = State()
+	date = State()
+
+@dp.message_handler(lambda message: message.text == 'Напомнить о контрольной', state='*')
+async def inform_test(message: types.Message):
+	if db.user_type(message.from_user.id):
+		await message.answer(f'<b><i>Введите номер класса:</i></b> \n\n{check_all_class(message.from_user.id)}')
+		await InformTest.class_id.set()
+	else:
+		await message.answer('У вас нет прав на данную функцию') 	
+
+@dp.message_handler(state=InformTest.class_id)
+async def inform_test_class_id(message: types.Message, state: FSMContext):
+	await state.update_data(id_class=int(message.text))
+	user_data = await state.get_data()
+
+	class_id = db.get_all_member_class(db.get_all_info_user(message.from_user.id)[4], user_data['id_class'])[0][6]
+
+	all_subjects = ''
+	for id_subject, subject in enumerate(db.get_all_subjects(db.get_class(class_id)[3])):
+		all_subjects += f'{id_subject + 1} | {subject[0]}\n'
+
+	await message.answer(f'Введите номер предмета:\n{all_subjects}')
+	await InformTest.next()
+
+@dp.message_handler(state=InformTest.subject)
+async def inform_test_subject(message: types.Message, state: FSMContext):
+	await state.update_data(id_subject=int(message.text))
+
+	await message.answer(f'Введите дату проведения контрольной работы\nПример - 26.01.2022')
+	await InformTest.next()	
+
+@dp.message_handler(state=InformTest.date)
+async def inform_test_date(message: types.Message, state: FSMContext):
+	await state.update_data(date=message.text)
+	user_data = await state.get_data()
+	
+	class_id = db.get_all_member_class(db.get_all_info_user(message.from_user.id)[4], user_data['id_class'])[0][6]
+	all_users_class = db.get_all_member_class(db.get_all_info_user(message.from_user.id)[4], class_id)
+	subject_title = db.get_all_subjects(db.get_class(class_id)[3])[user_data['id_subject'] - 1][0]
+
+	for user in all_users_class:
+		try:
+			await bot.send_message(user[5], f'Учитель {db.get_all_info_user(message.from_user.id)[1]} {db.get_all_info_user(message.from_user.id)[9]} напоминает вам о <b><i>контрольной работе</i></b>\nОна пройдёт <i>{user_data["date"]}</i> по предмету <b>{subject_title}</b>')
+		except ChatNotFound as e:
+			print(e)
+
+	await message.answer('Прекрасно!\nНапоминания отправлены')
+	await state.finish()	
+	await start(message)
+
+@dp.message_handler(lambda message: message.text == 'Мероприятия', state='*')
+async def events_menu(message: types.Message):
+	if db.user_type(message.from_user.id):
+		button_add_event = KeyboardButton('Добавить мероприятие')
+		button_upcoming_events = KeyboardButton('Ближайшие мероприятия')
+		button_inform_event = KeyboardButton('Напомнить о мероприятии')
+		button_exit = KeyboardButton('Выйти')
+
+		menu = ReplyKeyboardMarkup(one_time_keyboard=True)
+		menu.add(button_add_event, button_upcoming_events, button_inform_event, button_exit)
+
+		message.answer(f'Вы можете добавить новое меропрития или напомнить своим ученикам о ближайшем мероприятии ',reply_markup=menu)
+	else:
+		await message.answer('У вас нет прав на данную функцию') 
 
 @dp.message_handler(commands=['exit'],state='*')
 async def exit(message: types.Message, state: FSMContext):

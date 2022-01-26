@@ -1,3 +1,7 @@
+import math
+from datetime import date
+
+
 def get_eng_day(rus_day):
 	eng_days = {
 	'понедельник': 'monday',
@@ -29,4 +33,15 @@ def reduce_subjects_titles(subjects_titles: list):
 		except KeyError:
 			final_subjects.append(subject)
 	return final_subjects
+
+def rating_formula(impact, avg_mark):
+	return math.trunc(impact * 50 + avg_mark * 100)
+
+def get_days_before_ct():
+	now = date.today()
+	ct = date(2022,6,16)
+	final = str(ct - now)
+
+	return final.split(" ")[0]
+
 	

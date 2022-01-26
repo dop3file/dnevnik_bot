@@ -1,7 +1,6 @@
 from PIL import Image, ImageDraw, ImageFont
 
 
-    
 MAX_HOMEWORK_LENGHT = 35
 
 step_lesson = 75.5
@@ -24,8 +23,6 @@ left_y_days = [310,926,1542]
 
 # 315 для домашки по y // понедельник
 # 77 для перехода на следующий урок
-
-
 
 def draw_timetable(days, date_year, date_month, date_day_start, date_day_end):
     im = Image.open('shablon.jpg')
@@ -167,8 +164,9 @@ def draw_timetable_student(days, date_year, date_month, date_day_start, date_day
             font=font_mark,
             fill=('red'))
         else:
+            mark[0] -= 3
             draw_text.text(
-           (3020,300 + (step_lesson * mark[0] * 8) + (step_lesson * mark[1])),
+           (3020,225 + (77 * mark[0] * 8) + (77 * mark[1])),
            str(mark[2]),
            font=font_mark,
            fill=('red'))

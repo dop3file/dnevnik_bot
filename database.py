@@ -6,7 +6,7 @@ from datetime import date
 
 class Database:
 	def __init__(self,database_file):
-		self.connection = sqlite3.connect(database_file)
+		self.connection = sqlite3.connect(database_file, check_same_thread=False)
 		self.cursor = self.connection.cursor()
 
 	def add_user(self, name, surname, city, school_id, telegram_id, class_id, type_, moderation, patronymic):	
@@ -86,7 +86,7 @@ class Database:
 
 	def get_all_info_school(self, school_id):
 		with self.connection:
-			result = self.cursor.execute('SELECT * FROM `schools` WHERE `school_id` = ?', (telegram_id,)).fetchall()
+			result = self.cursor.execute('SELECT * FROM `schools` WHERE `school_id` = ?', (school_id,)).fetchall()
 			return result[0]
 
 	def get_count_schools(self):
@@ -106,9 +106,9 @@ class Database:
 		with self.connection:
 			return self.cursor.execute(f'SELECT `title_subject` FROM `subjects` WHERE `start_learn` <= {class_number} AND `end_learn` >= {class_number}').fetchall()
 
-	def add_mark(self, subject, mark, telegram_id, comment=None):
+	def add_mark(self, subject, mark, date, telegram_id, comment=None):
 		with self.connection:
-			self.cursor.execute("INSERT INTO `marks` (`subject`,`mark`,`date`,`telegram_id`,`comment`) VALUES(?,?,datetime('now'),?,?) ",(subject,mark,telegram_id,comment))
+			self.cursor.execute("INSERT INTO `marks` (`subject`,`mark`,`date`,`telegram_id`,`comment`) VALUES(?,?,?,?,?) ",(subject,mark,date,telegram_id,comment))
 
 	def get_all_marks_student(self, subject, telegram_id):
 		with self.connection:
@@ -168,7 +168,35 @@ class Database:
 		with self.connection:
 			return self.cursor.execute('SELECT * FROM `homework` WHERE `date` BETWEEN ? AND ? ORDER BY `date`', (start_week_day, end_week_day)).fetchall()
 
-
 	def get_homework_order_specific_date(self, date):
 		with self.connection:
 			return self.cursor.execute('SELECT * FROM `homework` WHERE `date` = ?',(date,)).fetchone()
+
+	def get_all_schools_leaderboard(self):
+		with self.connection:
+			result = self.cursor.execute('SELECT * FROM `schools`').fetchall()
+			return result
+
+	def get_all_marks_student_leaderboard(self, telegram_id):
+		with self.connection:
+			return self.cursor.execute('SELECT avg(`mark`) FROM `marks` WHERE `telegram_id` = ?',(telegram_id,)).fetchall()
+
+	def get_all_student_school(self, school_id):
+		with self.connection:
+			return self.cursor.execute('SELECT * FROM `users` WHERE `school_id` = ? AND `type` = 0 ORDER BY `rating` DESC', (school_id,)).fetchall()
+
+	def update_rating(self, rating, telegram_id):
+		with self.connection:
+			self.cursor.execute('UPDATE `users` SET `rating` = ? WHERE `telegram_id` = ?',(rating,telegram_id))
+
+	def get_impact_user(self, telegram_id):
+		with self.connection:
+			return self.cursor.execute('SELECT `impact` FROM `users` WHERE `telegram_id` = ?', (telegram_id,)).fetchone()
+
+	def get_count_any(self, table):
+		with self.connection:
+			result = self.cursor.execute(f'SELECT COUNT(*) FROM `{table}`').fetchone()
+			return result[0]
+
+
+			
